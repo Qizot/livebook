@@ -15,9 +15,22 @@ defmodule LivebookCLI.Server do
   @impl true
   def usage() do
     """
-    Usage: livebook server [options]
+    Usage: livebook server [options] [open-command]
 
-    Available options:
+    An optional open-command can be given as argument. It will open
+    up a browser window according these rules:
+
+      * If the open-command is "new", the browser window will point
+        to a new notebook
+
+      * If the open-command is a URL, the notebook at the given URL
+        will be imported
+
+    The open-command runs after the server is started. If a server is
+    already running, the browser window will point to the server
+    currently running.
+
+    ## Available options
 
       --autosave-path      The directory where notebooks with no file are persisted.
                            Defaults to livebook/notebooks/ under the default user cache
@@ -36,7 +49,6 @@ defmodule LivebookCLI.Server do
       --no-token           Disable token authentication, enabled by default
                            If LIVEBOOK_PASSWORD is set, it takes precedence over token auth
       --open               Open browser window pointing to the application
-      --open-new           Open browser window pointing to a new notebook
       -p, --port           The port to start the web application on, defaults to 8080
       --root-path          The root path to use for file selection
       --sname              Set a short name for the app distributed node
@@ -47,12 +59,26 @@ defmodule LivebookCLI.Server do
 
     #{@environment_variables}
 
+    ## Examples
+
+    Starts a server:
+
+        livebook server
+
+    Starts a server and opens up a browser at a new notebook:
+
+        livebook server new
+
+    Starts a server and imports the notebook at the given URL:
+
+        livebook server https://example.com/my-notebook.livemd
+
     """
   end
 
   @impl true
   def call(args) do
-    opts = args_to_options(args)
+    {opts, extra_args} = args_to_options(args)
     config_entries = opts_to_config(opts, [])
     put_config_entries(config_entries)
 
@@ -62,7 +88,7 @@ defmodule LivebookCLI.Server do
     case check_endpoint_availability(base_url) do
       :livebook_running ->
         IO.puts("Livebook already running on #{base_url}")
-        open_from_options(base_url, opts)
+        open_from_options(base_url, opts, extra_args)
 
       :taken ->
         print_error(
@@ -75,7 +101,7 @@ defmodule LivebookCLI.Server do
         # so it's gonna start listening
         case Application.ensure_all_started(:livebook) do
           {:ok, _} ->
-            open_from_options(LivebookWeb.Endpoint.access_url(), opts)
+            open_from_options(LivebookWeb.Endpoint.access_url(), opts, extra_args)
             Process.sleep(:infinity)
 
           {:error, error} ->
@@ -116,16 +142,28 @@ defmodule LivebookCLI.Server do
     end
   end
 
-  defp open_from_options(base_url, opts) do
+  defp open_from_options(base_url, opts, []) do
     if opts[:open] do
       Livebook.Utils.browser_open(base_url)
     end
+  end
 
-    if opts[:open_new] do
-      base_url
-      |> append_path("/explore/notebooks/new")
-      |> Livebook.Utils.browser_open()
-    end
+  defp open_from_options(base_url, _opts, ["new"]) do
+    base_url
+    |> append_path("/explore/notebooks/new")
+    |> Livebook.Utils.browser_open()
+  end
+
+  defp open_from_options(base_url, _opts, [url]) do
+    base_url
+    |> Livebook.Utils.notebook_import_url(url)
+    |> Livebook.Utils.browser_open()
+  end
+
+  defp open_from_options(_base_url, _opts, _extra_args) do
+    print_error(
+      "Too many arguments entered. Ensure only one argument is used to specify the file path and all other arguments are preceded by the relevant switch"
+    )
   end
 
   @switches [
@@ -135,7 +173,6 @@ defmodule LivebookCLI.Server do
     ip: :string,
     name: :string,
     open: :boolean,
-    open_new: :boolean,
     port: :integer,
     root_path: :string,
     sname: :string,
@@ -147,9 +184,9 @@ defmodule LivebookCLI.Server do
   ]
 
   defp args_to_options(args) do
-    {opts, _} = OptionParser.parse!(args, strict: @switches, aliases: @aliases)
+    {opts, extra_args} = OptionParser.parse!(args, strict: @switches, aliases: @aliases)
     validate_options!(opts)
-    opts
+    {opts, extra_args}
   end
 
   defp validate_options!(opts) do

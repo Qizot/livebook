@@ -45,13 +45,13 @@ if Mix.target() == :app do
     @impl true
     def handle_event({:wx, @wx_id_exit, _, _, _}, state) do
       :init.stop()
-      {:stop, :normal, state}
+      {:stop, :shutdown, state}
     end
 
     @impl true
     def handle_event({:wx, _, _, _, {:wxClose, :close_window}}, state) do
       :init.stop()
-      {:stop, :normal, state}
+      {:stop, :shutdown, state}
     end
 
     # TODO: investigate "Universal Links" [1], that is, instead of livebook://foo, we have
@@ -84,10 +84,8 @@ if Mix.target() == :app do
     end
 
     defp import_livebook(url) do
-      LivebookWeb.Endpoint.access_struct_url()
-      |> Map.replace!(:path, "/import")
-      |> append_query("url=#{URI.encode_www_form(url)}")
-      |> URI.to_string()
+      url
+      |> Livebook.Utils.notebook_import_url()
       |> Livebook.Utils.browser_open()
     end
 
@@ -110,15 +108,6 @@ if Mix.target() == :app do
 
     defp macos?() do
       :os.type() == {:unix, :darwin}
-    end
-
-    # TODO: On Elixir v1.14, use URI.append_query/2
-    defp append_query(%URI{query: query} = uri, query_to_add) when query in [nil, ""] do
-      %{uri | query: query_to_add}
-    end
-
-    defp append_query(%URI{} = uri, query) do
-      %{uri | query: uri.query <> "&" <> query}
     end
   end
 end
